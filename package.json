@@ -1,0 +1,52 @@
+{
+  "name": "@telemai/openclaw-plugin",
+  "version": "0.2.7",
+  "description": "Telem web search and page fetch tools for OpenClaw.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "scripts/setup.mjs",
+    "LICENSE",
+    "README.md"
+  ],
+  "bin": {
+    "telem-openclaw-setup": "./scripts/setup.mjs"
+  },
+  "scripts": {
+    "build": "rm -rf dist && esbuild index.ts --bundle --platform=node --format=esm --external:typebox --external:openclaw --outfile=dist/index.js --minify-whitespace --minify-syntax --legal-comments=none",
+    "prepack": "npm run build",
+    "setup": "node scripts/setup.mjs",
+    "test": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "typebox": "^1.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0",
+    "vite-node": "^3.2.4",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.7.1"
+    }
+  }
+}

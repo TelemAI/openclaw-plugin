@@ -1,0 +1,97 @@
+{
+  "id": "telem",
+  "name": "Telem",
+  "description": "Telem web search and page fetch tools for OpenClaw.",
+  "activation": {
+    "onStartup": true
+  },
+  "setup": {
+    "providers": [
+      {
+        "id": "telem",
+        "envVars": [
+          "TELEM_API_KEY"
+        ]
+      }
+    ],
+    "requiresRuntime": false
+  },
+  "contracts": {
+    "tools": [
+      "telem_search",
+      "telem_fetch"
+    ]
+  },
+  "uiHints": {
+    "apiKey": {
+      "label": "Telem API Key",
+      "help": "Telem API key (fallback: TELEM_API_KEY env var).",
+      "placeholder": "tlm_...",
+      "sensitive": true
+    },
+    "baseUrl": {
+      "label": "Telem Server URL",
+      "help": "Telem deployment to call (fallback: TELEM_BASE_URL). Defaults to the hosted service.",
+      "placeholder": "https://router.telem.ai"
+    },
+    "tier": {
+      "label": "Telem Search Tier",
+      "help": "Named V2 result-field tier (fallback: TELEM_TIER)."
+    },
+    "fields": {
+      "label": "Telem Search Fields",
+      "help": "Explicit V2 result fields (fallback: TELEM_FIELDS, comma-separated). Mutually exclusive with tier."
+    },
+    "providersInclude": {
+      "label": "Included Telem Providers",
+      "help": "Replace the deployment provider set (fallback: TELEM_PROVIDERS_INCLUDE, comma-separated)."
+    },
+    "providersExclude": {
+      "label": "Excluded Telem Providers",
+      "help": "Remove providers from the selected set (fallback: TELEM_PROVIDERS_EXCLUDE, comma-separated)."
+    },
+    "fullContent": {
+      "label": "Retrieve Full Content",
+      "help": "Ask providers to retrieve full page content (fallback: TELEM_FULL_CONTENT=1). Search never renders it inline; use telem_fetch for page reads."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": {
+        "type": "string"
+      },
+      "baseUrl": {
+        "type": "string"
+      },
+      "tier": {
+        "type": "string",
+        "enum": ["minimalist", "default", "extended", "max"]
+      },
+      "fields": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "providersInclude": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "seltz", "serpapi", "tavily", "you"]
+        }
+      },
+      "providersExclude": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "seltz", "serpapi", "tavily", "you"]
+        }
+      },
+      "fullContent": {
+        "type": "boolean"
+      }
+    }
+  }
+}
