@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { Type } from "typebox"
 import { formatFetchResults } from "./format.js"
+import { cacheScope, newDeliveryPlan, postWithOmissionRetry } from "./incremental.js"
 import type { TelemToolDeps, ToolTextResult } from "./tool-deps.js"
 
 // Client-side mirror of the server's web_fetch_max_urls default. The server's
@@ -74,6 +75,13 @@ export function createTelemFetchTool(deps: TelemToolDeps) {
     ): Promise<ToolTextResult> => {
       const urls = validateFetchUrls(rawParams.urls)
 
+      // Config first, for the same reason as telem_search: the omission scope
+      // must be the scope this POST uses (spec 2026-08-24). The search
+      // block is never attached here, but the base url and key are shared — and
+      // they are exactly what the scope is made of.
+      const config = deps.getConfig()
+      const delivery = newDeliveryPlan(cacheScope(config.baseUrl, config.apiKey))
+
       const history = await deps.readHistory(toolCallId)
 
       // Minted ONCE per execute call, before the payload is built, so any
@@ -84,7 +92,7 @@ export function createTelemFetchTool(deps: TelemToolDeps) {
         // Flat under metadata — v5 has no nested `trajectory` block. `fetch` is
         // the declared intent; the backend derives authoritatively from the
         // request shape and 400s on contradiction.
-        Object.assign(metadata, await deps.buildTrajectory({ nodeKey, kind: "fetch" }))
+        Object.assign(metadata, await deps.buildTrajectory({ nodeKey, kind: "fetch", delivery }))
       } catch {
         // Unreachable by contract; bookkeeping may never fail a fetch.
         metadata.node_key = nodeKey
@@ -102,24 +110,32 @@ export function createTelemFetchTool(deps: TelemToolDeps) {
       // the endpoint refuses a kind that CONTRADICTS it, and "fetch" agrees.
       const body: Record<string, unknown> = { urls, metadata }
 
-      const config = deps.getConfig()
       const headers: Record<string, string> = { "Content-Type": "application/json" }
       if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
 
       // A single POST — a fetch bills providers and creates an interaction, so a
-      // transient failure is surfaced rather than silently re-run.
-      const doFetch = deps.fetchImpl ?? fetch
-      const response = await doFetch(`${config.baseUrl}/v1/fetch`, {
-        method: "POST",
+      // transient failure is surfaced rather than silently re-run. Same single
+      // omission retry as telem_search (ONE helper, both tools) — a fetch
+      // delivers its ancestors through the very same backend handler and can be
+      // refused by the very same guard, only through the `{"error": {...}}`
+      // envelope.
+      const { response, detail } = await postWithOmissionRetry({
+        doFetch: deps.fetchImpl ?? fetch,
+        url: `${config.baseUrl}/v1/fetch`,
         headers,
-        body: JSON.stringify(body),
+        body,
+        delivery,
+        restore: deps.restoreOmittedContexts,
         signal,
       })
       if (!response.ok) {
-        const detail = await response.text().catch(() => "")
         throw new Error(`Telem fetch failed: HTTP ${response.status} ${detail.slice(0, 200)}`)
       }
       const interaction = await response.json()
+      // ONE watermark for both tools: a fetch delivers ancestors through
+      // the same handler, so a fetch 2xx is delivery proof for a later search
+      // exactly as a search's is for a later fetch. Marked on ok + parsed only.
+      deps.recordDelivery(delivery, interaction)
       const telemSessionId = interaction.session_id ? String(interaction.session_id) : undefined
 
       // The backend session id is bookkeeping, not instruction: structured tool

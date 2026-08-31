@@ -11,6 +11,7 @@ import { readSessionTranscriptEvents } from "openclaw/plugin-sdk/session-transcr
 import * as sessionStore from "openclaw/plugin-sdk/session-store-runtime"
 import { resolveTelemConfig } from "./src/config.js"
 import { flattenTranscriptEntries } from "./src/history.js"
+import type { DeliveryPlan } from "./src/incremental.js"
 import { createTelemFetchTool } from "./src/telem-fetch.js"
 import { createTelemSearchTool } from "./src/telem-search.js"
 import { createTrajectoryTracker, type TrajectoryHost } from "./src/trajectory.js"
@@ -166,14 +167,29 @@ export default definePluginEntry({
               currentToolCallId,
             })
           },
-          buildTrajectory: ({ nodeKey, kind }: { nodeKey: string; kind: string }) =>
+          buildTrajectory: ({
+            nodeKey,
+            kind,
+            delivery,
+          }: {
+            nodeKey: string
+            kind: string
+            delivery: DeliveryPlan
+          }) =>
             trajectories.buildTrajectory({
               sessionKey,
               sessionId,
               ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
               nodeKey,
               kind,
+              delivery,
             }),
+          // Phase-1 incremental ancestor delivery (spec 2026-08-24). The
+          // belief lives on the module-level tracker, so ONE watermark serves
+          // both tools and every conversation in this gateway process — which is
+          // what makes a fetch's 2xx delivery proof for a later search.
+          recordDelivery: trajectories.recordDelivery,
+          restoreOmittedContexts: trajectories.restoreOmittedContexts,
         }
         return [createTelemSearchTool(deps), createTelemFetchTool(deps)]
       },

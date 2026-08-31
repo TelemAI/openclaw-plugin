@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto"
 import { Type } from "typebox"
 import { buildSearchBlock } from "./config.js"
 import { formatResults } from "./format.js"
+import { cacheScope, newDeliveryPlan, postWithOmissionRetry } from "./incremental.js"
 import type { TelemToolDeps, ToolTextResult } from "./tool-deps.js"
 
 /** Search and fetch take the identical host seam; see src/tool-deps.ts. */
@@ -90,6 +91,14 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
 
       const goal = typeof rawParams.goal === "string" ? rawParams.goal : undefined
 
+      // Resolved HERE, per call, and BEFORE the trajectory is built (spec
+      // 2026-08-24): the (baseUrl, apiKey) scope decides which ancestor
+      // contexts may be omitted, and that decision has to be taken against the
+      // very scope this POST then uses — resolving afterwards could omit against
+      // one world what was only ever delivered to another.
+      const config = deps.getConfig()
+      const delivery = newDeliveryPlan(cacheScope(config.baseUrl, config.apiKey))
+
       const history = await deps.readHistory(toolCallId)
 
       // Minted ONCE per execute call, before the payload is built, so any
@@ -98,7 +107,7 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
       const metadata: Record<string, unknown> = { message_history: history }
       try {
         // Flat under metadata — v5 has no nested `trajectory` block.
-        Object.assign(metadata, await deps.buildTrajectory({ nodeKey, kind: "search" }))
+        Object.assign(metadata, await deps.buildTrajectory({ nodeKey, kind: "search", delivery }))
       } catch {
         // Unreachable by contract; bookkeeping may never fail a search.
         metadata.node_key = nodeKey
@@ -120,7 +129,6 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
         postprocessor_names: [],
         metadata,
       }
-      const config = deps.getConfig()
       const search = buildSearchBlock(config)
       if (search) body.search = search
 
@@ -130,18 +138,33 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
       // A single POST — the search is not idempotent (each run bills providers and
       // creates an interaction), so a transient failure is surfaced rather than
       // silently re-run.
-      const doFetch = deps.fetchImpl ?? fetch
-      const response = await doFetch(`${config.baseUrl}/v1/interactions`, {
-        method: "POST",
+      //
+      // The ONE exception is the guard's `missing_snapshots` 409, and it
+      // does not weaken that stance: it is a PRE-EXECUTION refusal — nothing ran,
+      // nothing billed, nothing persisted — so the retry is this call's only
+      // execution, carrying the same node_keys.
+      const { response, detail } = await postWithOmissionRetry({
+        doFetch: deps.fetchImpl ?? fetch,
+        url: `${config.baseUrl}/v1/interactions`,
         headers,
-        body: JSON.stringify(body),
+        body,
+        delivery,
+        restore: deps.restoreOmittedContexts,
         signal,
       })
       if (!response.ok) {
-        const detail = await response.text().catch(() => "")
         throw new Error(`Telem search failed: HTTP ${response.status} ${detail.slice(0, 200)}`)
       }
       const interaction = await response.json()
+      // Delivery is proven HERE: ok plus a body that parsed. A json
+      // throw skips this line, which is the "parse failure marks nothing" rule,
+      // and a non-ok already threw above.
+      //
+      // Deliberately BEFORE the envelope gate: a pre-V2 answer fails the SEARCH
+      // for the model, but it was still a real 2xx interaction whose trajectory
+      // write (Phase B, committed before the search runs) landed — those ancestor
+      // contexts are in the database either way.
+      deps.recordDelivery(delivery, interaction)
       assertV2Envelope(interaction)
       const telemSessionId = interaction.session_id ? String(interaction.session_id) : undefined
 

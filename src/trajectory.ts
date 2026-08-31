@@ -18,7 +18,18 @@
 // This module is host-independent: all session-store and transcript access goes
 // through the injected TrajectoryHost so it unit-tests without an OpenClaw host.
 import { createHash } from "node:crypto"
-import { flattenTranscriptEntries } from "./history.js"
+import { flattenTranscriptEntries, type HistoryMessage } from "./history.js"
+import {
+  CAPABILITY_CAP,
+  DELIVERED_CAP,
+  MISSING_SNAPSHOTS,
+  createLruSet,
+  deliveredKey,
+  incrementalForced,
+  incrementalMode,
+  type DeliveryPlan,
+  type OmittedContext,
+} from "./incremental.js"
 import { findSpawnBoundaryEntry, selectTranscriptPathTo } from "./transcript-compat.js"
 
 // ---------------------------------------------------------------------------
@@ -341,6 +352,25 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
   // physical sessionId -> resolved logical seed. Keyed by PHYSICAL id so /new
   // stays correct: a fresh id has no entry, walks, finds no link, seeds to itself.
   const seedMemo = new Map<string, string>()
+  // Phase-1 belief (spec 2026-08-24), per plugin process and per
+  // (baseUrl, key) scope: `delivered` holds the (scope, snapshot) pairs whose
+  // context is PROVEN landed, `capability` the scopes whose backend has proven
+  // it implements the guard. Bounded like every other tracker here —
+  // eviction costs one redundant full re-send, which is the safe direction.
+  const delivered = createLruSet(DELIVERED_CAP)
+  const capability = createLruSet(CAPABILITY_CAP)
+
+  /**
+   * Does THIS call omit context for snapshots already delivered to `scope`?
+   * Both halves must agree: the mode (on by default, `off` is the kill switch)
+   * AND the server's own capability signal. Production waits for the signal; the
+   * differential harness — and only it — forces the answer.
+   */
+  function omitsDeliveredContext(scope: string): boolean {
+    if (incrementalMode() === "off") return false
+    if (incrementalForced()) return true
+    return capability.has(scope)
+  }
 
   function safeGetEntry(sessionKey: string, agentId?: string): SessionSnapshot | undefined {
     try {
@@ -484,10 +514,20 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
    * The ONE shared materializer — used identically by live and reload-recovered
    * descriptors. Returns undefined for any transient failure; the caller omits
    * the ancestor and nulls across the hole rather than floating to a grandparent.
+   *
+   * `mayOmit` is the phase-1 send-time decision, taken here because the snapshot
+   * key is only known once the boundary is resolved. The context is materialized
+   * on EVERY call, omitting or not: it materialized them this call and merely
+   * withheld them at send time — which is precisely what makes the
+   * guard's retry a swap on the built body rather than a second transcript read
+   * of a session that may have moved since.
    */
   async function materialize(
     d: AncestorDescriptor,
-  ): Promise<{ key: string; entry: Record<string, unknown> } | undefined> {
+    mayOmit: (snapshotKey: string) => boolean = () => false,
+  ): Promise<
+    { key: string; entry: Record<string, unknown>; withheld?: HistoryMessage[] } | undefined
+  > {
     const sessionFile = resolveAncestorFile(d)
     let events: unknown[]
     try {
@@ -523,16 +563,25 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
     if (path.length === 0) return undefined // boundary not in this generation
 
     const key = d.snapshotNodeKey ?? snapshotNodeKey(d.parentPhysicalSessionId, boundaryId)
+    const context = flattenTranscriptEntries(
+      path.filter((e) => e.role !== undefined).map((e) => ({ role: e.role, message: e.message })),
+    )
+    // The entry is unchanged on every key EXCEPT `context`: session_key,
+    // fingerprint, node_key, parent_node_key and spawned_at still travel on
+    // every call — the fingerprint fills the session row per call, and the
+    // always-sent edge set is what keeps v5 self-heal independent of client
+    // memory. `context_omitted` is functional, not decorative: it is the
+    // server's licence to skip the row rather than freeze a null into it.
+    const omit = mayOmit(key)
     return {
       key,
+      ...(omit ? { withheld: context } : {}),
       entry: {
         session_key: d.sessionKey,
         fingerprint: fingerprint(d.logicalSeed),
         node_key: key,
         parent_node_key: null,
-        context: flattenTranscriptEntries(
-          path.filter((e) => e.role !== undefined).map((e) => ({ role: e.role, message: e.message })),
-        ),
+        ...(omit ? { context_omitted: true } : { context }),
         // When the delegation actually happened, from the spawn entry's own
         // harness timestamp — not the backend row's created_at, which only says
         // "when the first descendant reported".
@@ -628,9 +677,64 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
     ancestorsOf,
 
     /**
+     * Called only after a response came back ok AND its body parsed. NEVER at
+     * send time: a parallel sibling would otherwise omit on the strength of a
+     * request that can still fail before the backend's Phase B commits — which
+     * is exactly how a permanently context-less node is born.
+     *
+     * Marking runs even when the mode is off. Passive learning costs nothing, is
+     * never acted on while off, and means flipping the mode on does not need a
+     * warm-up call to re-earn what this process already proved.
+     */
+    recordDelivery(delivery: DeliveryPlan, body: unknown): void {
+      for (const key of delivery.sentWithContext) {
+        delivered.add(deliveredKey(delivery.scope, key))
+      }
+      if (!body || typeof body !== "object") return
+      // KEY PRESENCE, never truthiness — the healthy value is `[]`. A
+      // backend without the guard omits the key entirely and so never grants
+      // capability, which is what keeps an omitting client off an old server.
+      if (!(MISSING_SNAPSHOTS in (body as Record<string, unknown>))) return
+      capability.add(delivery.scope)
+      // Reported keys are nodes the backend refused to create: un-mark them so
+      // the next call carries their full context again.
+      const missing = (body as Record<string, unknown>)[MISSING_SNAPSHOTS]
+      if (!Array.isArray(missing)) return
+      for (const key of missing) delivered.remove(deliveredKey(delivery.scope, String(key)))
+    },
+
+    /**
+     * Put every withheld context back into the body this call already built, for
+     * the guard's single in-call retry.
+     *
+     * Un-marking comes FIRST and is not conditional on the retry succeeding: the
+     * 409 falsified this process's belief that those rows exist, and a sibling
+     * building its body right now must carry their contexts too. A retry that
+     * then fails leaves them unmarked, which is the safe direction — one
+     * redundant full re-send.
+     *
+     * The keys move to `sentWithContext`, so the retry's 2xx marks exactly what
+     * the retry actually carried, through the same recordDelivery as any call.
+     */
+    restoreOmittedContexts(delivery: DeliveryPlan): void {
+      for (const { key, entry, context } of delivery.omitted) {
+        delivered.remove(deliveredKey(delivery.scope, key))
+        delete entry.context_omitted
+        entry.context = context
+        delivery.sentWithContext.push(key)
+      }
+      delivery.omitted = []
+    },
+
+    /**
      * The v5 wire payload for one search/fetch node. Never throws: identity
      * failure degrades to a best-effort self key, lineage failure to
      * `parent_node_key: null` with no ancestors.
+     *
+     * `delivery` is the phase-1 ledger this call fills in: the scope the
+     * POST will use, what went out WITH context, and what was withheld. Omitted
+     * entirely (as the tracker's own unit tests do), nothing is ever withheld —
+     * the full-transmission wire.
      */
     async buildTrajectory(req: {
       sessionKey: string
@@ -638,6 +742,7 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
       agentId?: string
       nodeKey: string
       kind: string
+      delivery?: DeliveryPlan
     }): Promise<TrajectoryPayload> {
       const fallbackSessionId = req.sessionId || req.sessionKey
       let identity: SelfIdentity
@@ -671,11 +776,23 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
         ancestors: [],
       }
 
+      const delivery = req.delivery
+      // ONE decision for the whole chain, taken against the SAME scope the POST
+      // will use — the caller resolves its config BEFORE building the trajectory
+      // because omitting against one world what was only ever
+      // delivered to another is exactly the frozen-null row this guards.
+      const scope = delivery?.scope ?? ""
+      const omitDelivered = delivery !== undefined && omitsDeliveredContext(scope)
+      const mayOmit = (snapshotKey: string): boolean =>
+        omitDelivered && delivered.has(deliveredKey(scope, snapshotKey))
+
       try {
         const chain = ancestorsOf(req.sessionKey, req.agentId)
         if (!chain.length) return payload
-        const materialized = await Promise.all(chain.map((d) => materialize(d)))
+        const materialized = await Promise.all(chain.map((d) => materialize(d, mayOmit)))
         const ancestors: Record<string, unknown>[] = []
+        const sentWithContext: string[] = []
+        const omitted: OmittedContext[] = []
         for (let i = 0; i < materialized.length; i++) {
           const current = materialized[i]
           if (!current) continue
@@ -683,15 +800,32 @@ export function createTrajectoryTracker(host: TrajectoryHost) {
           const previous = i > 0 ? materialized[i - 1] : undefined
           current.entry.parent_node_key = i === 0 ? null : (previous?.key ?? null)
           ancestors.push(current.entry)
+          // The two halves of the ledger, read off the entry that actually
+          // ships: what carried context, and what withheld it (context kept).
+          if ("context" in current.entry) sentWithContext.push(current.key)
+          else if (current.withheld) {
+            omitted.push({ key: current.key, entry: current.entry, context: current.withheld })
+          }
         }
         // The search node's parent is the DIRECT parent's snapshot specifically.
         const direct = materialized[materialized.length - 1]
         payload.parent_node_key = direct?.key ?? null
         payload.ancestors = ancestors
+        // Published at the very end, deliberately: anything that throws above
+        // leaves the plan empty, so the call marks nothing — and, with `omitted`
+        // empty too, a degraded call cannot take the retry path either.
+        if (delivery) {
+          delivery.sentWithContext = sentWithContext
+          delivery.omitted = omitted
+        }
       } catch {
         // Lineage failure: a valid root search, never a failed one.
         payload.parent_node_key = null
         payload.ancestors = []
+        if (delivery) {
+          delivery.sentWithContext = []
+          delivery.omitted = []
+        }
       }
       return payload
     },

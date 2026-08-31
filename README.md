@@ -114,6 +114,11 @@ strips a leftover `providers` config value.
 interaction, but search output intentionally omits it. Use `telem_fetch` when the model
 needs to read a page.
 
+Repeated tool calls from the same conversation do not resend history the service
+already holds. This is on by default; set `TELEM_INCREMENTAL=off` (that exact word) to
+send every history in full. It is an environment-only operator switch — there is no
+config-file key — and it is read per tool call.
+
 ## Troubleshooting
 
 ### A Telem tool is missing
