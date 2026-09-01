@@ -1,6 +1,6 @@
 {
   "name": "@telemai/openclaw-plugin",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Telem web search and page fetch tools for OpenClaw.",
   "type": "module",
   "license": "Apache-2.0",
