@@ -10,6 +10,7 @@ import { buildSearchBlock } from "./config.js"
 import { formatResults } from "./format.js"
 import { cacheScope, newDeliveryPlan, postWithOmissionRetry } from "./incremental.js"
 import type { TelemToolDeps, ToolTextResult } from "./tool-deps.js"
+import { maybeNotifyClientUpdate } from "./update-advisory.js"
 
 /** Search and fetch take the identical host seam; see src/tool-deps.ts. */
 export type TelemSearchDeps = TelemToolDeps
@@ -165,6 +166,11 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
       // write (Phase B, committed before the search runs) landed — those ancestor
       // contexts are in the database either way.
       deps.recordDelivery(delivery, interaction)
+      // Off-model client update advisory (spec 2026-09-01). Runs right after
+      // recordDelivery and BEFORE the V2 gate — for the same reason recordDelivery
+      // does: a pre-V2 answer is still a real 2xx whose body parsed, and the notice
+      // rides console.warn, never the tool result. Never throws into the turn.
+      maybeNotifyClientUpdate(interaction)
       assertV2Envelope(interaction)
       const telemSessionId = interaction.session_id ? String(interaction.session_id) : undefined
 

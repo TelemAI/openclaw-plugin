@@ -8,6 +8,7 @@ import { Type } from "typebox"
 import { formatFetchResults } from "./format.js"
 import { cacheScope, newDeliveryPlan, postWithOmissionRetry } from "./incremental.js"
 import type { TelemToolDeps, ToolTextResult } from "./tool-deps.js"
+import { maybeNotifyClientUpdate } from "./update-advisory.js"
 
 // Client-side mirror of the server's web_fetch_max_urls default. The server's
 // 400s stay the authority; validating here only saves the round trip.
@@ -136,6 +137,10 @@ export function createTelemFetchTool(deps: TelemToolDeps) {
       // the same handler, so a fetch 2xx is delivery proof for a later search
       // exactly as a search's is for a later fetch. Marked on ok + parsed only.
       deps.recordDelivery(delivery, interaction)
+      // Off-model client update advisory (spec 2026-09-01), same seam as
+      // telem_search: right after recordDelivery, on console.warn, never into the
+      // model-facing fetch render. Never throws into the turn.
+      maybeNotifyClientUpdate(interaction)
       const telemSessionId = interaction.session_id ? String(interaction.session_id) : undefined
 
       // The backend session id is bookkeeping, not instruction: structured tool

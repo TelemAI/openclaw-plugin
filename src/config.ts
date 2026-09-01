@@ -46,24 +46,29 @@ function readStringList(value: unknown): string[] | undefined {
   return items.length ? items : undefined
 }
 
+// The ~/.telem directory, honoring TELEM_CONFIG_DIR but refusing a dir that
+// lexically points inside the working tree — a committed <repo>/.telem must not
+// steer traffic. Project-unaware OpenClaw's equivalent of the config-core guard
+// (which uses a passed projectRoot); process.cwd stands in for the project the
+// plugin runs against. Inlined (this package does not depend on config-core), and
+// SHARED so the credentials read and the update-notice stamp (src/update-advisory.ts)
+// resolve to the very same directory.
+export function resolveTelemDir(env: NodeJS.ProcessEnv): string {
+  const home = join(homedir(), ".telem")
+  const requested = readString(env.TELEM_CONFIG_DIR)
+  if (!requested) return home
+  const resolved = resolve(requested)
+  const cwd = resolve(process.cwd())
+  return resolved === cwd || resolved.startsWith(cwd + sep) ? home : resolved
+}
+
 // Read ~/.telem/credentials.json — the file create-telemai writes. Inlined (this
 // package does not depend on config-core) but semantically the SDK's read_credentials:
 // never throws, silent, apiKey/baseUrl only. It is the LAST credential source, below the
 // OpenClaw config entry and the environment, so the installer's key reaches OpenClaw too.
 function readCredentials(env: NodeJS.ProcessEnv): { apiKey?: string; baseUrl?: string } {
   try {
-    const home = join(homedir(), ".telem")
-    const requested = readString(env.TELEM_CONFIG_DIR)
-    // Refuse a credentials dir that lexically points inside the working tree — a committed
-    // <repo>/.telem/credentials.json must not steer traffic. Project-unaware OpenClaw's
-    // equivalent of the config-core guard (which uses a passed projectRoot); process.cwd
-    // stands in for the project the plugin runs against.
-    let dir = home
-    if (requested) {
-      const resolved = resolve(requested)
-      const cwd = resolve(process.cwd())
-      dir = resolved === cwd || resolved.startsWith(cwd + sep) ? home : resolved
-    }
+    const dir = resolveTelemDir(env)
     const data = JSON.parse(readFileSync(join(dir, "credentials.json"), "utf8")) as unknown
     if (typeof data !== "object" || data === null) return {}
     const record = data as Record<string, unknown>
