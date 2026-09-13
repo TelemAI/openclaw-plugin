@@ -15,6 +15,9 @@ export type TelemSearchOptions = {
   providersInclude?: string[]
   providersExclude?: string[]
   fullContent?: boolean
+  autoRouting?: string
+  maxRoutingProviders?: number
+  topic?: string
 }
 
 export type TelemConfig = TelemSearchOptions & {
@@ -164,6 +167,14 @@ export function resolveTelemConfig(cfg?: unknown, env: NodeJS.ProcessEnv = proce
   )
   if (fullContent) config.fullContent = fullContent.value
 
+  // The routing keys are env-only on purpose: they are not plugin config options.
+  const autoRouting = readString(env.TELEM_AUTO_ROUTING)
+  if (autoRouting) config.autoRouting = autoRouting
+  const count = env.TELEM_MAX_ROUTING_PROVIDERS
+  if (count !== undefined && /^\s*[+-]?\d+\s*$/.test(count)) config.maxRoutingProviders = Number(count)
+  const topic = readString(env.TELEM_TOPIC)
+  if (topic) config.topic = topic
+
   return config
 }
 
@@ -181,5 +192,8 @@ export function buildSearchBlock(options: TelemSearchOptions): Record<string, un
   if (Object.keys(providers).length) block.providers = providers
 
   if (options.fullContent !== undefined) block.include_full_content = options.fullContent
+  if (options.autoRouting !== undefined) block.auto_routing = options.autoRouting
+  if (options.maxRoutingProviders !== undefined) block.max_routing_providers = options.maxRoutingProviders
+  if (options.topic !== undefined) block.topic = options.topic
   return Object.keys(block).length ? block : null
 }
