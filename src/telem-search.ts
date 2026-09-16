@@ -37,6 +37,13 @@ const TelemSearchSchema = Type.Object(
           "on every search where you know the task.",
       }),
     ),
+    topic: Type.Optional(
+      Type.String({
+        description:
+          "Optional. Set it only when the answer must come from one site: linkedin, reddit, " +
+          "or x (twitter is also accepted). Leave it unset otherwise.",
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -130,7 +137,11 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
         postprocessor_names: [],
         metadata,
       }
-      const search = buildSearchBlock(config)
+      // The model's per-call topic, trimmed, beats the configured one. The routing mode
+      // is never taken from the model: it comes from the autoRouting config key.
+      const topic = typeof rawParams.topic === "string" ? rawParams.topic.trim() : ""
+      const configured = buildSearchBlock(config)
+      const search = topic ? { ...configured, topic } : configured
       if (search) body.search = search
 
       const headers: Record<string, string> = { "Content-Type": "application/json" }

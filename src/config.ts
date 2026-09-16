@@ -33,6 +33,7 @@ type PluginEntryConfig = {
   providersInclude?: unknown
   providersExclude?: unknown
   fullContent?: unknown
+  autoRouting?: unknown
 }
 
 type Sourced<T> = { value: T; level: number }
@@ -167,8 +168,11 @@ export function resolveTelemConfig(cfg?: unknown, env: NodeJS.ProcessEnv = proce
   )
   if (fullContent) config.fullContent = fullContent.value
 
-  // The routing keys are env-only on purpose: they are not plugin config options.
-  const autoRouting = readString(env.TELEM_AUTO_ROUTING)
+  // autoRouting is a published option, so it may come from this plugin's own config.
+  // The environment wins over it: the rule for this one key is that the shell
+  // overrides the client's configuration, and here the plugin entry IS that
+  // configuration. topic and the count below stay env-only.
+  const autoRouting = readString(env.TELEM_AUTO_ROUTING) ?? readString(entry.autoRouting)
   if (autoRouting) config.autoRouting = autoRouting
   const count = env.TELEM_MAX_ROUTING_PROVIDERS
   if (count !== undefined && /^\s*[+-]?\d+\s*$/.test(count)) config.maxRoutingProviders = Number(count)
