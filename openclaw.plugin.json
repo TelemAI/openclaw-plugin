@@ -50,6 +50,10 @@
       "label": "Excluded Telem Providers",
       "help": "Remove providers from the selected set (fallback: TELEM_PROVIDERS_EXCLUDE, comma-separated)."
     },
+    "autoRouting": {
+      "label": "Telem Auto-Routing",
+      "help": "Let Telem choose which providers run each search, and what to optimise for: accuracy, latency, or search_cost. Empty means the configured provider set runs. TELEM_AUTO_ROUTING overrides this setting."
+    },
     "fullContent": {
       "label": "Retrieve Full Content",
       "help": "Ask providers to retrieve full page content (fallback: TELEM_FULL_CONTENT=1). Search never renders it inline; use telem_fetch for page reads."
@@ -79,15 +83,18 @@
         "type": "array",
         "items": {
           "type": "string",
-          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "seltz", "serpapi", "tavily", "you"]
+          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "perplexity", "seltz", "serpapi", "tavily", "tinyfish", "you"]
         }
       },
       "providersExclude": {
         "type": "array",
         "items": {
           "type": "string",
-          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "seltz", "serpapi", "tavily", "you"]
+          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "perplexity", "seltz", "serpapi", "tavily", "tinyfish", "you"]
         }
+      },
+      "autoRouting": {
+        "type": "string"
       },
       "fullContent": {
         "type": "boolean"
