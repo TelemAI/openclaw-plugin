@@ -52,7 +52,7 @@
     },
     "autoRouting": {
       "label": "Telem Auto-Routing",
-      "help": "Let Telem choose which providers run each search, and what to optimise for: accuracy, latency, or search_cost. Empty means the configured provider set runs. TELEM_AUTO_ROUTING overrides this setting."
+      "help": "Let Telem choose which providers run each search, and what to optimise for: accuracy, latency, or search_cost. Set accuracy to turn it on. Empty or off means the configured provider set runs. TELEM_AUTO_ROUTING overrides this setting."
     },
     "fullContent": {
       "label": "Retrieve Full Content",
