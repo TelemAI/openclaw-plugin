@@ -20,7 +20,14 @@ export type TelemSearchOptions = {
   topic?: string
 }
 
-export type TelemConfig = TelemSearchOptions & {
+/** The fetch keys (hosted-fetch-options spec F3), as resolved; sent only by telem_fetch. */
+export type TelemFetchOptions = {
+  fetchProviders?: string[]
+  fetchTier?: string
+  fetchNoCache?: boolean
+}
+
+export type TelemConfig = TelemSearchOptions & TelemFetchOptions & {
   baseUrl: string
   apiKey?: string
 }
@@ -34,6 +41,9 @@ type PluginEntryConfig = {
   providersExclude?: unknown
   fullContent?: unknown
   autoRouting?: unknown
+  fetchProviders?: unknown
+  fetchTier?: unknown
+  fetchNoCache?: unknown
 }
 
 type Sourced<T> = { value: T; level: number }
@@ -181,7 +191,31 @@ export function resolveTelemConfig(cfg?: unknown, env: NodeJS.ProcessEnv = proce
   const topic = readString(env.TELEM_TOPIC)
   if (topic) config.topic = topic
 
+  // The fetch keys, per key: plugin config > environment, like every option here.
+  const fetchProviders = resolveOption(entry.fetchProviders, splitCsv(env.TELEM_FETCH_PROVIDERS), readStringList)
+  if (fetchProviders) config.fetchProviders = fetchProviders.value
+  const fetchTier = resolveOption(entry.fetchTier, env.TELEM_FETCH_TIER, readString)
+  if (fetchTier) config.fetchTier = fetchTier.value
+  const fetchNoCache = resolveOption(
+    entry.fetchNoCache,
+    env.TELEM_FETCH_NO_CACHE === "1" ? true : undefined,
+    readFlag,
+  )
+  if (fetchNoCache) config.fetchNoCache = fetchNoCache.value
+
   return config
+}
+
+// The fetch `options` block (hosted-fetch-options spec F3): providers / tier /
+// no_cache, in that key order, or null when none resolved. It validates nothing (the
+// router judges names); it lowercases `tier`, and sends `no_cache` as resolved, so a
+// configured `false` is sent as `false`. The same block every other surface sends.
+export function buildFetchOptions(options: TelemFetchOptions): Record<string, unknown> | null {
+  const block: Record<string, unknown> = {}
+  if (options.fetchProviders !== undefined) block.providers = [...options.fetchProviders]
+  if (options.fetchTier !== undefined) block.tier = options.fetchTier.toLowerCase()
+  if (options.fetchNoCache !== undefined) block.no_cache = options.fetchNoCache
+  return Object.keys(block).length ? block : null
 }
 
 // The V2 search block, omitted entirely when no option is resolved so the

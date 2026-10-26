@@ -77,6 +77,9 @@ trailing slashes are removed before endpoint paths are appended.
 | `providersInclude` | `TELEM_PROVIDERS_INCLUDE` (comma-separated) | Replace the deployment provider set |
 | `providersExclude` | `TELEM_PROVIDERS_EXCLUDE` (comma-separated) | Subtract providers from the selected set |
 | `fullContent` | `TELEM_FULL_CONTENT` (`1` only) | Retrieve full content for the interaction; never render it inline |
+| `fetchProviders` | `TELEM_FETCH_PROVIDERS` (comma-separated) | `telem_fetch` only: pin the fetch providers, in order (one name means no failover) |
+| `fetchTier` | `TELEM_FETCH_TIER` | `telem_fetch` only: fetch tier, `minimalist`, `default`, `extended`, or `max` (not case-sensitive) |
+| `fetchNoCache` | `TELEM_FETCH_NO_CACHE` (`1` only) | `telem_fetch` only: read every page live, skipping the shared fetch cache |
 
 ```json5
 {

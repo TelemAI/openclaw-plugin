@@ -5,6 +5,7 @@
 // model never sees or threads a Telem session id.
 import { randomUUID } from "node:crypto"
 import { Type } from "typebox"
+import { buildFetchOptions } from "./config.js"
 import { formatFetchResults } from "./format.js"
 import { cacheScope, newDeliveryPlan, postWithOmissionRetry } from "./incremental.js"
 import type { TelemToolDeps, ToolTextResult } from "./tool-deps.js"
@@ -105,11 +106,14 @@ export function createTelemFetchTool(deps: TelemToolDeps) {
 
       // /v1/fetch (endpoint-split spec): the body carries the top-level
       // `urls` list and the backend assembles the fetch pipeline itself. The
-      // endpoint is extra="forbid", so no legacy user_input key. Configured
-      // providers are never attached: that setting pins SEARCH providers, and
-      // the endpoint rejects a `search` block outright. `metadata.kind` stays —
-      // the endpoint refuses a kind that CONTRADICTS it, and "fetch" agrees.
+      // endpoint is extra="forbid", so no legacy user_input key. The configured
+      // search providers are never attached: that setting pins SEARCH providers,
+      // and the endpoint rejects a `search` block outright. The fetch keys ride
+      // as the typed `options` block. `metadata.kind` stays — the endpoint
+      // refuses a kind that CONTRADICTS it, and "fetch" agrees.
       const body: Record<string, unknown> = { urls, metadata }
+      const fetchOptions = buildFetchOptions(config)
+      if (fetchOptions) body.options = fetchOptions
 
       const headers: Record<string, string> = { "Content-Type": "application/json" }
       if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`

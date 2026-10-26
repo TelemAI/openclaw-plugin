@@ -57,6 +57,18 @@
     "fullContent": {
       "label": "Retrieve Full Content",
       "help": "Ask providers to retrieve full page content (fallback: TELEM_FULL_CONTENT=1). Search never renders it inline; use telem_fetch for page reads."
+    },
+    "fetchProviders": {
+      "label": "Telem Fetch Providers",
+      "help": "Pin the providers telem_fetch reads pages with, in order; one name means no failover (fallback: TELEM_FETCH_PROVIDERS, comma-separated)."
+    },
+    "fetchTier": {
+      "label": "Telem Fetch Tier",
+      "help": "Fetch tier for telem_fetch: minimalist, default, extended or max (fallback: TELEM_FETCH_TIER)."
+    },
+    "fetchNoCache": {
+      "label": "Skip The Fetch Cache",
+      "help": "Read every page live instead of from the shared fetch cache (fallback: TELEM_FETCH_NO_CACHE=1)."
     }
   },
   "configSchema": {
@@ -71,7 +83,12 @@
       },
       "tier": {
         "type": "string",
-        "enum": ["minimalist", "default", "extended", "max"]
+        "enum": [
+          "minimalist",
+          "default",
+          "extended",
+          "max"
+        ]
       },
       "fields": {
         "type": "array",
@@ -83,20 +100,56 @@
         "type": "array",
         "items": {
           "type": "string",
-          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "perplexity", "seltz", "serpapi", "tavily", "tinyfish", "you"]
+          "enum": [
+            "brave",
+            "ceramic",
+            "exa",
+            "linkup",
+            "parallel",
+            "perplexity",
+            "seltz",
+            "serpapi",
+            "tavily",
+            "tinyfish",
+            "you"
+          ]
         }
       },
       "providersExclude": {
         "type": "array",
         "items": {
           "type": "string",
-          "enum": ["brave", "ceramic", "exa", "linkup", "parallel", "perplexity", "seltz", "serpapi", "tavily", "tinyfish", "you"]
+          "enum": [
+            "brave",
+            "ceramic",
+            "exa",
+            "linkup",
+            "parallel",
+            "perplexity",
+            "seltz",
+            "serpapi",
+            "tavily",
+            "tinyfish",
+            "you"
+          ]
         }
       },
       "autoRouting": {
         "type": "string"
       },
       "fullContent": {
+        "type": "boolean"
+      },
+      "fetchProviders": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "fetchTier": {
+        "type": "string"
+      },
+      "fetchNoCache": {
         "type": "boolean"
       }
     }
