@@ -123,6 +123,8 @@ export function createTelemSearchTool(deps: TelemSearchDeps) {
       // very scope this POST then uses — resolving afterwards could omit against
       // one world what was only ever delivered to another.
       const config = deps.getConfig()
+      // The config can run no search (exclude empties include): refuse before any request.
+      if (config.refusal !== undefined) throw new Error(config.refusal)
       const delivery = newDeliveryPlan(cacheScope(config.baseUrl, config.apiKey))
 
       const history = await deps.readHistory(toolCallId)

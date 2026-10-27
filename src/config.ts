@@ -30,6 +30,8 @@ export type TelemFetchOptions = {
 export type TelemConfig = TelemSearchOptions & TelemFetchOptions & {
   baseUrl: string
   apiKey?: string
+  /** Set when the config can run no search: providersExclude removes every provider in providersInclude. */
+  refusal?: string
 }
 
 type PluginEntryConfig = {
@@ -115,6 +117,26 @@ function resolveOption<T>(
 }
 
 let lastCompositionWarning: string | undefined
+let lastProvidersWarning: string | undefined
+
+/** Where each provider list was set, as the end of "set …" in a refusal, by level. */
+const PROVIDER_SOURCES = {
+  include: ["in the plugin entry (plugins.entries.telem.config)", "by TELEM_PROVIDERS_INCLUDE"],
+  exclude: ["in the plugin entry (plugins.entries.telem.config)", "by TELEM_PROVIDERS_EXCLUDE"],
+} as const
+
+/** The refusal sentence every surface uses (config-core's `providersRefusal`). */
+export function providersRefusal(include: readonly string[], inInclude: string, inExclude: string): string {
+  const names = include.join(", ")
+  const fix =
+    inInclude === inExclude
+      ? `Remove ${names} from one of the two lists ${inInclude}.`
+      : `Remove ${names} from providersInclude (set ${inInclude}) or from providersExclude (set ${inExclude}).`
+  return (
+    `[telem] providersExclude removes every provider in providersInclude (${names}), ` +
+    `so no provider is left and no search was sent. ${fix}`
+  )
+}
 
 // cfg is the current OpenClawConfig snapshot. It and the environment are read on
 // every tool call, so a host config reload takes effect without re-registering
@@ -165,11 +187,36 @@ export function resolveTelemConfig(cfg?: unknown, env: NodeJS.ProcessEnv = proce
   if (tier) config.tier = tier.value
   if (fields) config.fields = fields.value
 
-  const providersInclude = readStringList(entry.providersInclude) ?? splitCsv(env.TELEM_PROVIDERS_INCLUDE)
-  if (providersInclude) config.providersInclude = providersInclude
-
-  const providersExclude = readStringList(entry.providersExclude) ?? splitCsv(env.TELEM_PROVIDERS_EXCLUDE)
-  if (providersExclude) config.providersExclude = providersExclude
+  // Exclude wins (owner design, 2026-10-26): the excluded names leave the include
+  // list before anything is sent, as on every other surface. When nothing is
+  // left, the search is refused: the default set could hold an excluded provider.
+  const include = resolveOption(entry.providersInclude, splitCsv(env.TELEM_PROVIDERS_INCLUDE), readStringList)
+  const exclude = resolveOption(entry.providersExclude, splitCsv(env.TELEM_PROVIDERS_EXCLUDE), readStringList)
+  if (include && exclude) {
+    const excluded = new Set(exclude.value)
+    const kept = include.value.filter((name) => !excluded.has(name))
+    const dropped = include.value.filter((name) => excluded.has(name))
+    if (!kept.length) {
+      config.refusal = providersRefusal(
+        include.value,
+        PROVIDER_SOURCES.include[include.level],
+        PROVIDER_SOURCES.exclude[exclude.level],
+      )
+    } else {
+      config.providersInclude = kept
+      const signature = `${include.value.join(",")}|${exclude.value.join(",")}`
+      if (dropped.length && lastProvidersWarning !== signature) {
+        lastProvidersWarning = signature
+        console.warn(
+          `[telem] providersExclude removes ${dropped.join(", ")} from providersInclude: ` +
+            `this search runs ${kept.join(", ")}.`,
+        )
+      }
+    }
+  } else {
+    if (include) config.providersInclude = include.value
+    if (exclude) config.providersExclude = exclude.value
+  }
 
   const fullContent = resolveOption(
     entry.fullContent,
@@ -219,8 +266,9 @@ export function buildFetchOptions(options: TelemFetchOptions): Record<string, un
 }
 
 // The V2 search block, omitted entirely when no option is resolved so the
-// deployment's defaults apply. Include/exclude are forwarded unchanged; the
-// server owns their set composition and validation.
+// deployment's defaults apply. When both provider lists resolved, the config has
+// already taken the excluded names off the include list; an exclude list alone is
+// forwarded for the server to apply to the deployment set.
 export function buildSearchBlock(options: TelemSearchOptions): Record<string, unknown> | null {
   const block: Record<string, unknown> = {}
   if (options.tier !== undefined) block.tier = options.tier
