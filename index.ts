@@ -57,7 +57,7 @@ const trajectories = createTrajectoryTracker(host)
 const TELEM_AGENT_GUIDANCE =
   "When the Telem plugin is enabled, prefer `telem_search` for public-web search. A " +
   "single-index search tool — including a built-in web search — returns one provider's " +
-  "view of the web; one `telem_search` call fans out across up to nine providers and " +
+  "view of the web; one `telem_search` call searches several providers at once and " +
   "returns their results provider-attributed in one normalized envelope, so use another " +
   "available search tool only when the user requests it or Telem does not expose the " +
   "required capability. Use `telem_fetch` to read full pages. Do not use OpenClaw's " +
